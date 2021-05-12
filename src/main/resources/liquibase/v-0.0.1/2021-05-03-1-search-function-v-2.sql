@@ -1,5 +1,28 @@
-ALTER TABLE books DROP COLUMN IF EXISTS txt;
-ALTER TABLE books ADD COLUMN txt VARCHAR;
+-- updating book txt by book id ---
+
+CREATE OR REPLACE FUNCTION updateBookTxt(int8) RETURNS void
+              AS $$
+UPDATE books
+SET txt = COALESCE(title, '') || ' ' ||
+
+          (SELECT COALESCE(string_agg(au.name, ' '), '')
+           FROM authors au
+                    LEFT JOIN books_authors ba ON ba.authors_id = au.id
+           WHERE ba.book_id = $1) || ' ' ||
+
+          (SELECT COALESCE(string_agg(cl.title, ' '), '')
+           FROM classifications cl
+                    LEFT JOIN books_classifications bc ON bc.classifications_id = cl.id
+           WHERE bc.book_id = $1) || ' ' ||
+
+          (SELECT COALESCE(string_agg(lb.title, ' '), '')
+           FROM labels lb
+                    LEFT JOIN books_labels bl ON bl.labels_id = lb.id
+           WHERE bl.book_id = $1)
+WHERE id = $1
+    $$
+LANGUAGE SQL;
+
 
 -- //////////////////////////// triggers for join tables//////////////////////
 CREATE OR REPLACE FUNCTION book_join_tables_function_trigger()
@@ -14,25 +37,7 @@ ELSE
 		  book_id_value := OLD.book_id;
 END IF;
 
-UPDATE books
-SET txt = to_tsvector('simple', COALESCE(title, '') || ' ' ||
-
-                                (SELECT COALESCE(string_agg(au.name, ' '), '')
-                                 FROM authors au
-                                          LEFT JOIN books_authors ba ON ba.authors_id = au.id
-                                 WHERE ba.book_id = book_id_value) || ' ' ||
-
-                                (SELECT COALESCE(string_agg(cl.title, ' '), '')
-                                 FROM classifications cl
-                                          LEFT JOIN books_classifications bc ON bc.classifications_id = cl.id
-                                 WHERE bc.book_id = book_id_value) || ' ' ||
-
-                                (SELECT COALESCE(string_agg(lb.title, ' '), '')
-                                 FROM labels lb
-                                          LEFT JOIN books_labels bl ON bl.labels_id = lb.id
-                                 WHERE bl.book_id = book_id_value))
-WHERE id = book_id_value;
-
+PERFORM updateBookTxt(book_id_value);
 
 IF TG_ARGV[0] = 'NEW'
 			THEN RETURN NEW;
@@ -61,7 +66,6 @@ CREATE TRIGGER fts_books_classifications_delete_trigger
     ON books_classifications
     FOR EACH ROW
     EXECUTE PROCEDURE book_join_tables_function_trigger('OLD');
-
 
 -- //////////////////////////////////books_labels//////////////////////
 DROP TRIGGER IF EXISTS fts_books_labels_insert_trigger ON books_labels;
@@ -98,8 +102,8 @@ CREATE TRIGGER fts_books_authors_delete_trigger
     EXECUTE PROCEDURE book_join_tables_function_trigger('OLD');
 
 
+-- ///////////////////////////////////authors-labels-books///////////////////////////////////////
 
--- //////////////////////////////////authors-labels-books//////////////////////
 
 CREATE OR REPLACE FUNCTION tables_update_trigger_func()
               RETURNS trigger AS
@@ -107,35 +111,25 @@ CREATE OR REPLACE FUNCTION tables_update_trigger_func()
               DECLARE
               table_name_v VARCHAR;
 table_column VARCHAR;
+ids int8[];
+b_id int8;
 BEGIN
     table_name_v := TG_ARGV[0];
 table_column := TG_ARGV[1];
 
-EXECUTE format('UPDATE books
-		SET txt =
-		to_tsvector($escape$ simple $escape$ , COALESCE(title, $escape$$escape$) || $escape$ $escape$ ||
-					(SELECT COALESCE(string_agg(au.name, $escape$ $escape$), $escape$$escape$)
-					FROM authors au
-					LEFT JOIN books_authors ba ON ba.authors_id = au.id
-					WHERE ba.book_id = id) || $escape$ $escape$ ||
+EXECUTE format('SELECT ARRAY(SELECT book_id FROM %s WHERE %s = %s)', table_name_v, table_column, NEW.id) INTO ids;
 
-					(SELECT COALESCE(string_agg(cl.title, $escape$ $escape$), $escape$$escape$)
-					FROM classifications cl
-					LEFT JOIN books_classifications bc ON bc.classifications_id = cl.id
-					WHERE bc.book_id = id) || $escape$ $escape$ ||
+FOREACH b_id IN ARRAY ids
 
-					(SELECT COALESCE(string_agg(lb.title, $escape$ $escape$), $escape$$escape$)
-					FROM labels lb
-					LEFT JOIN books_labels bl ON bl.labels_id = lb.id
-					WHERE bl.book_id = id))
-		WHERE id IN (SELECT book_id FROM %s WHERE %s = %s);', table_name_v, table_column, NEW.id);
+		LOOP
+				PERFORM updateBookTxt(b_id);
 
+END LOOP;
 
 RETURN NEW;
 END
 $BODY$
 LANGUAGE 'plpgsql';
-
 
 DROP TRIGGER IF EXISTS authors_update_trigger ON authors;
 

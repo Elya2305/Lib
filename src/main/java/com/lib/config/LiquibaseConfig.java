@@ -11,6 +11,7 @@ import org.springframework.context.annotation.DependsOn;
 import javax.sql.DataSource;
 import java.util.Objects;
 
+// todo run liqui after creatign tables
 @Configuration
 @RequiredArgsConstructor
 public class LiquibaseConfig {

@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface BookRepository extends JpaRepository<Book, Long> {
-    @Query(value = "select * from books b where b.txt @@ plainto_tsquery(:search) or b.txt like concat('%', lower(:search), '%') " +
-                   "or b.title @@ plainto_tsquery(:search) or b.title like concat('%', lower(:search), '%')", nativeQuery = true)
+    @Query(value = "select * from books b where lower(b.txt) like concat('%', lower(:search), '%')", nativeQuery = true)
     Page<Book> searchBooks(String search, Pageable pageable);
 }
